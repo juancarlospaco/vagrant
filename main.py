@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+1# -*- coding: utf-8 -*-
 # PEP8:OK, LINT:OK, PY3:OK
 
 
@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 0.1 '
+__version__ = ' 0.2 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -31,12 +31,17 @@ __full_licence__ = ''
 
 
 # imports
-from os import environ, linesep, chmod, remove
+from os import environ, linesep, chmod, remove, path, chdir, makedirs
 from sip import setapi
 from datetime import datetime
 from subprocess import check_output as getoutput
 from random import choice
 from getpass import getuser
+
+try:
+    from os import startfile
+except ImportError:
+    from subprocess import Popen
 
 from PyQt4.QtGui import (QLabel, QCompleter, QDirModel, QPushButton, QSpinBox,
     QDockWidget, QVBoxLayout, QLineEdit, QIcon, QCheckBox, QColor, QMessageBox,
@@ -100,6 +105,8 @@ Vagrant.configure("2") do |config|
 end
 '''
 
+BASE = path.abspath(path.join(path.expanduser("~"), 'vagrant'))
+
 
 ###############################################################################
 
@@ -111,8 +118,7 @@ class Main(plugin.Plugin):
         super(Main, self).initialize(*args, **kwargs)
 
         # directory auto completer
-        self.completer = QCompleter(self)
-        self.dirs = QDirModel(self)
+        self.completer, self.dirs = QCompleter(self), QDirModel(self)
         self.dirs.setFilter(QDir.AllEntries | QDir.NoDotAndDotDot)
         self.completer.setModel(self.dirs)
         self.completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -131,7 +137,6 @@ class Main(plugin.Plugin):
             else QNetworkProxy.Socks5Proxy, proxy_url.host(), proxy_url.port(),
                  proxy_url.userName(), proxy_url.password())) \
             if 'http_proxy' in environ else None
-        print((' INFO: Proxy Auto-Config as ' + str(proxy_url)))
 
         self.mainwidget = QTabWidget()
         self.mainwidget.tabCloseRequested.connect(lambda:
@@ -141,7 +146,6 @@ class Main(plugin.Plugin):
         self.mainwidget.setStyleSheet('QTabBar{font-weight:bold;}')
         self.mainwidget.setMovable(True)
         self.mainwidget.setTabsClosable(True)
-        self.mainwidget.setTabShape(QTabWidget.Triangular)
 
         self.dock = QDockWidget()
         self.dock.setWindowTitle(__doc__)
@@ -151,26 +155,27 @@ class Main(plugin.Plugin):
         self.misc = self.locator.get_service('misc')
         self.misc.add_widget(self.dock, QIcon.fromTheme("virtualbox"), __doc__)
 
-        self.tab1 = QGroupBox()
-        self.tab2 = QGroupBox()
-        self.tab3 = QGroupBox()
-        self.tab4 = QGroupBox()
-        self.tab5 = QGroupBox()
-        self.tab6 = QGroupBox()
+        self.tab1, self.tab2, self.tab3 = QGroupBox(), QGroupBox(), QGroupBox()
+        self.tab4, self.tab5, self.tab6 = QGroupBox(), QGroupBox(), QGroupBox()
         for a, b in ((self.tab1, 'Basic Startup'),
             (self.tab2, 'General Options'), (self.tab3, 'VM Package Manager'),
             (self.tab4, 'VM Provisioning'), (self.tab5, 'VM Desktop GUI'),
                      (self.tab6, 'Run')):
             a.setTitle(b)
+            a.setToolTip(b)
             self.mainwidget.addTab(a, QIcon.fromTheme("virtualbox"), b)
 
         QPushButton(QIcon.fromTheme("help-about"), 'About', self.dock
-            ).clicked.connect(lambda:
-            QMessageBox.information(self.dock, __doc__, HELPMSG))
+        ).clicked.connect(lambda: QMessageBox.information(self.dock, __doc__,
+        HELPMSG))
 
         self.vmname = QLineEdit(self.get_random_name())
         self.vmname.setPlaceholderText('type_your_VM_name_here_without_spaces')
         self.vmname.setToolTip('Type VM name, no spaces or special characters')
+        self.target = QLabel('<b>Vagrant Target Folder: ' +
+                             path.join(BASE, self.vmname.text()))
+        self.vmname.textChanged.connect(lambda: self.target.setText(
+            '<b>Vagrant Target Folder: ' + path.join(BASE, self.vmname.text())))
         self.btn1 = QPushButton(QIcon.fromTheme("face-smile-big"), 'Suggestion')
         self.btn1.setToolTip('Suggest me a Random VM name !')
         self.btn1.clicked.connect(lambda:
@@ -183,7 +188,8 @@ class Main(plugin.Plugin):
         for each_widget in (
             QLabel('<b>Name for your new VM:</b>'), self.vmname, self.btn1,
             QLabel('<b>Choose Ubuntu Codename for the VM:</b>'), self.vmcode,
-            QLabel('<b>Choose an Architecture for the VM:</b>'), self.vmarch):
+            QLabel('<b>Choose an Architecture for the VM:</b>'), self.vmarch,
+            self.target):
             vboxg1.addWidget(each_widget)
 
         self.combo1 = QSpinBox()
@@ -245,6 +251,7 @@ class Main(plugin.Plugin):
             button = QPushButton(d)
             button.setCheckable(True)
             button.setMinimumSize(75, 50)
+            button.setToolTip(d)
             vboxg5.addWidget(button)
             self.buttonGroup.addButton(button)
 
@@ -254,13 +261,16 @@ class Main(plugin.Plugin):
             'Start Vagrant Instrumentation Now !')
         self.runbtn.setMinimumSize(75, 50)
         self.runbtn.clicked.connect(self.build)
+        self.stopbt = QPushButton(QIcon.fromTheme("media-playback-stop"),
+            'Stop Vagrant')
+        self.stopbt.clicked.connect(lambda: self.process.stop())
         self.killbt = QPushButton(QIcon.fromTheme("application-exit"),
             'Force Kill Vagrant')
         self.killbt.clicked.connect(lambda: self.process.kill())
         vboxg6 = QVBoxLayout(self.tab6)
         for each_widget in (
             QLabel('<b>Multiprocessing Output Logs:</b> '), self.output,
-            self.runbtn, self.killbt):
+            self.runbtn, self.stopbt, self.killbt):
             vboxg6.addWidget(each_widget)
 
         def must_glow(widget_list):
@@ -278,8 +288,9 @@ class Main(plugin.Plugin):
                     pass
 
         must_glow((self.runbtn, ))
-        [a.setChecked(True) for a in (self.qckb2, self.qckb3, self.qckb10,
-                            self.qckb11, self.qckb12, self.qckb13, self.qckb14)]
+        [a.setChecked(True) for a in (self.qckb1, self.qckb2, self.qckb3,
+            self.qckb10, self.qckb11, self.qckb12, self.qckb13, self.qckb14)]
+        self.mainwidget.setCurrentIndex(5)
 
     def get_de_pkg(self, button):
         ' get package from desktop name '
@@ -303,11 +314,11 @@ class Main(plugin.Plugin):
             'ixion', 'varuna', 'quaoar', 'sedna', 'methone', 'jupiter', ))
 
     def readOutput(self):
-        """Read and append sphinx-build output to the logBrowser"""
+        """Read and append output to the logBrowser"""
         self.output.append(str(self.process.readAllStandardOutput()))
 
     def readErrors(self):
-        """Read and append sphinx-build errors to the logBrowser"""
+        """Read and append errors to the logBrowser"""
         self.output.append(self.formatErrorMsg(str(
                                         self.process.readAllStandardError())))
 
@@ -324,15 +335,22 @@ class Main(plugin.Plugin):
         return '<font color="{}">{}</font>'.format(color, msg)
 
     def build(self):
-        """Main function calling sphinx-build to generate the project"""
+        """Main function calling vagrant to generate the vm"""
         self.output.setText('')
         self.output.append(self.formatInfoMsg(
                             'INFO: OK: Starting at {}'.format(datetime.now())))
         self.runbtn.setDisabled(True)
         # Do I need to run the init ?, what the init does that im missing ?
+        base = path.join(BASE, self.vmname.text())
         try:
-            remove('Vagrantfile')
+            self.output.append(self.formatInfoMsg(
+                ' INFO: OK: Created the Target Folder {}'.format(base)))
+            makedirs(base)
+            self.output.append(self.formatInfoMsg(
+                ' INFO: OK: Changed to Target Folder {}'.format(base)))
+            chdir(base)
             self.output.append(self.formatInfoMsg('INFO:Removing Vagrant file'))
+            remove(path.join(base, 'Vagrantfile'))
         except:
             self.output.append(self.formatErrorMsg('ERROR:Remove Vagrant file'))
         cmd1 = getoutput('nice -n {} vagrant init'.format(self.combo1.value()),
@@ -343,7 +361,7 @@ class Main(plugin.Plugin):
             'amd64' if self.vmarch.currentIndex() is 0 else 'i386',
             VBOXGUI if self.qckb3.isChecked() is True else '')
         self.output.append(self.formatInfoMsg('INFO:OK:Config: {}'.format(cfg)))
-        with open('Vagrantfile', 'w') as f:
+        with open(path.join(base, 'Vagrantfile'), 'w') as f:
             f.write(cfg)
             self.output.append(self.formatInfoMsg('INFO: Writing Vagrantfile'))
             f.close()
@@ -376,7 +394,7 @@ class Main(plugin.Plugin):
         linesep * 2,
         ))
         self.output.append(self.formatInfoMsg('INFO:OK:Script: {}'.format(prv)))
-        with open('bootstrap.sh', 'w') as f:
+        with open(path.join(base, 'bootstrap.sh'), 'w') as f:
             f.write(prv)
             self.output.append(self.formatInfoMsg('INFO: Writing bootstrap.sh'))
             f.close()
@@ -385,7 +403,7 @@ class Main(plugin.Plugin):
             self.output.append(self.formatInfoMsg('INFO: bootstrap.sh is 775'))
         except:
             chmod('bootstrap.sh', 0o775)  # Py3
-            self.output.append(self.formatInfoMsg('INFO: bootstrap.sh is 775'))
+            self.output.append(self.formatInfoMsg('INFO: bootstrap.sh is o775'))
         self.output.append(self.formatInfoMsg('INFO: OK: Running Vagrant Up !'))
         self.process.start('nice -n {} vagrant up'.format(self.combo1.value()))
         if not self.process.waitForStarted():
@@ -393,6 +411,7 @@ class Main(plugin.Plugin):
             self.runbtn.setEnabled(True)
             return
         self.runbtn.setEnabled(True)
+        chdir(path.expanduser("~"))
 
     def _process_finished(self):
         """finished sucessfully"""
@@ -404,7 +423,11 @@ class Main(plugin.Plugin):
                 f.write(self.output.toPlainText())
                 f.close()
         if self.qckb1.isChecked() is True:
-            pass  # FIXME: Open directory
+            try:
+                startfile(str(path.join((BASE, 'vagrant'))))
+            except:
+                Popen(["xdg-open", str(path.join((BASE, 'vagrant')))])
+        chdir(path.expanduser("~"))
 
 
 ###############################################################################
