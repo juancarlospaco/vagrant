@@ -1,4 +1,4 @@
-1# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # PEP8:OK, LINT:OK, PY3:OK
 
 
@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 0.2 '
+__version__ = ' 0.4 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -46,7 +46,7 @@ except ImportError:
 from PyQt4.QtGui import (QLabel, QCompleter, QDirModel, QPushButton, QSpinBox,
     QDockWidget, QVBoxLayout, QLineEdit, QIcon, QCheckBox, QColor, QMessageBox,
     QGraphicsDropShadowEffect, QGroupBox, QComboBox, QTabWidget, QButtonGroup,
-    QAbstractButton)
+    QAbstractButton, QScrollArea)
 
 from PyQt4.QtCore import Qt, QDir, QProcess, QUrl
 
@@ -147,10 +147,14 @@ class Main(plugin.Plugin):
         self.mainwidget.setMovable(True)
         self.mainwidget.setTabsClosable(True)
 
+        self.scrollable = QScrollArea()
+        self.scrollable.setWidgetResizable(True)
+        self.scrollable.setWidget(self.mainwidget)
+
         self.dock = QDockWidget()
         self.dock.setWindowTitle(__doc__)
         self.dock.setStyleSheet('QDockWidget::title{text-align: center;}')
-        self.dock.setWidget(self.mainwidget)
+        self.dock.setWidget(self.scrollable)
 
         self.misc = self.locator.get_service('misc')
         self.misc.add_widget(self.dock, QIcon.fromTheme("virtualbox"), __doc__)
