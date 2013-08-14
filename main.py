@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 0.4 '
+__version__ = ' 1.0 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -127,6 +127,8 @@ class Main(plugin.Plugin):
         self.desktop = ''
 
         self.process = QProcess()
+        self.process.readyReadStandardOutput.connect(self.readOutput)
+        self.process.readyReadStandardError.connect(self.readErrors)
         self.process.finished.connect(self._process_finished)
         self.process.error.connect(self._process_finished)
 
@@ -344,22 +346,25 @@ class Main(plugin.Plugin):
         self.output.append(self.formatInfoMsg(
                             'INFO: OK: Starting at {}'.format(datetime.now())))
         self.runbtn.setDisabled(True)
-        # Do I need to run the init ?, what the init does that im missing ?
         base = path.join(BASE, self.vmname.text())
         try:
             self.output.append(self.formatInfoMsg(
                 ' INFO: OK: Created the Target Folder {}'.format(base)))
             makedirs(base)
-            self.output.append(self.formatInfoMsg(
-                ' INFO: OK: Changed to Target Folder {}'.format(base)))
-            chdir(base)
+        except:
+            self.output.append(self.formatErrorMsg('ERROR:Target Folder Exist'))
+        self.output.append(self.formatInfoMsg('INFO: Changed {}'.format(base)))
+        chdir(base)
+        try:
             self.output.append(self.formatInfoMsg('INFO:Removing Vagrant file'))
             remove(path.join(base, 'Vagrantfile'))
         except:
             self.output.append(self.formatErrorMsg('ERROR:Remove Vagrant file'))
+        self.output.append(self.formatInfoMsg(' INFO: OK: Runing Vagrant Init'))
         cmd1 = getoutput('nice -n {} vagrant init'.format(self.combo1.value()),
                          shell=True)
-        self.output.append(self.formatInfoMsg('INFO:OK:Init: {}'.format(cmd1)))
+        self.output.append(self.formatInfoMsg('INFO:OK:Completed Vagrant Init'))
+        self.output.append(self.formatInfoMsg('INFO: Command: {}'.format(cmd1)))
         cfg = CONFIG.format(self.vmname.text(), self.chttps.currentText(),
             self.vmcode.currentText(), self.vmcode.currentText(),
             'amd64' if self.vmarch.currentIndex() is 0 else 'i386',
@@ -408,6 +413,8 @@ class Main(plugin.Plugin):
         except:
             chmod('bootstrap.sh', 0o775)  # Py3
             self.output.append(self.formatInfoMsg('INFO: bootstrap.sh is o775'))
+        self.output.append(self.formatInfoMsg(''' INFO: OK:
+        Vagrant Up needs time, depends on your Internet Connection Speed !'''))
         self.output.append(self.formatInfoMsg('INFO: OK: Running Vagrant Up !'))
         self.process.start('nice -n {} vagrant up'.format(self.combo1.value()))
         if not self.process.waitForStarted():
@@ -422,15 +429,17 @@ class Main(plugin.Plugin):
         self.output.append(self.formatInfoMsg(
                             'INFO: OK: Finished at {}'.format(datetime.now())))
         if self.qckb2.isChecked() is True:
-            with open('vagrant_ninja.log', 'w') as f:
+            LOG_FILE = path.join(BASE, self.vmname.text(), 'vagrant_ninja.log')
+            with open(LOG_FILE, 'w') as f:
                 self.output.append(self.formatInfoMsg('INFO: OK: Writing .LOG'))
                 f.write(self.output.toPlainText())
                 f.close()
         if self.qckb1.isChecked() is True:
+            self.output.append(self.formatInfoMsg('INFO:Opening Target Folder'))
             try:
-                startfile(str(path.join((BASE, 'vagrant'))))
+                startfile(BASE)
             except:
-                Popen(["xdg-open", str(path.join((BASE, 'vagrant')))])
+                Popen(["xdg-open", BASE])
         chdir(path.expanduser("~"))
 
 
