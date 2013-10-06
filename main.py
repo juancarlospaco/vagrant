@@ -18,12 +18,12 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 1.0 '
+__version__ = ' 2.0 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
 __url__ = 'github.com/juancarlospaco'
-__date__ = '01/05/2013'
+__date__ = '10/10/2013'
 __prj__ = 'vagrant'
 __docformat__ = 'html'
 __source__ = ''
@@ -43,7 +43,7 @@ try:
 except ImportError:
     from subprocess import Popen
 
-from PyQt4.QtGui import (QLabel, QCompleter, QDirModel, QPushButton, QSpinBox,
+from PyQt4.QtGui import (QLabel, QCompleter, QDirModel, QPushButton, QMenu,
     QDockWidget, QVBoxLayout, QLineEdit, QIcon, QCheckBox, QColor, QMessageBox,
     QGraphicsDropShadowEffect, QGroupBox, QComboBox, QTabWidget, QButtonGroup,
     QAbstractButton, QScrollArea)
@@ -92,8 +92,19 @@ and <a href="http://virtualbox.org">Virtualbox.org</a>
 
 VBOXGUI = '''
     config.vm.provider :virtualbox do |vb|
-        vb.gui = true
+        vb.gui = true  # false for NO GUI
+        vb.customize ["modifyvm", :id, "--memory", "1024"]  # RAM for VM
+        vb.customize ["modifyvm", :id, "--cpuexecutioncap", "99"]  # CPU for VM
     end
+'''
+
+APTGET_PROXY = '''# proxy support for the VM
+echo "Acquire::http::Proxy 'http://{}';" | tee /etc/apt/apt.conf.d/99proxy
+echo "Acquire::https::Proxy 'https://{}';" >> /etc/apt/apt.conf.d/99proxy
+echo "Acquire::ftp::Proxy 'ftp://{}';" >> /etc/apt/apt.conf.d/99proxy
+export http_proxy='http://{}'
+export https_proxy='https://{}'
+export ftp_proxy='ftp://{}'
 '''
 
 CONFIG = '''
@@ -124,7 +135,19 @@ class Main(plugin.Plugin):
         self.completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.completer.setCompletionMode(QCompleter.PopupCompletion)
 
-        self.desktop = ''
+        self.desktop, self.project, menu = '', '', QMenu('Vagrant')
+        menu.addAction('UP', lambda: self.vagrant_c('up'))
+        menu.addAction('HALT', lambda: self.vagrant_c('halt'))
+        menu.addAction('RELOAD', lambda: self.vagrant_c('reload'))
+        menu.addAction('STATUS', lambda: self.vagrant_c('status'))
+        menu.addAction('SUSPEND', lambda: self.vagrant_c('suspend'))
+        menu.addAction('RESUME', lambda: self.vagrant_c('resume'))
+        menu.addAction('PROVISION', lambda: self.vagrant_c('provision'))
+        menu.addAction('PACKAGE', lambda: self.vagrant_c('package'))
+        menu.addAction('INIT', lambda: self.vagrant_c('init'))
+        menu.addSeparator()
+        menu.addAction('DESTROY (!!!)', lambda: self.vagrant_c('destroy'))
+        self.locator.get_service('explorer').add_project_menu(menu, lang='all')
 
         self.process = QProcess()
         self.process.readyReadStandardOutput.connect(self.readOutput)
@@ -149,17 +172,15 @@ class Main(plugin.Plugin):
         self.mainwidget.setMovable(True)
         self.mainwidget.setTabsClosable(True)
 
-        self.scrollable = QScrollArea()
+        self.dock, self.scrollable = QDockWidget(), QScrollArea()
         self.scrollable.setWidgetResizable(True)
         self.scrollable.setWidget(self.mainwidget)
-
-        self.dock = QDockWidget()
         self.dock.setWindowTitle(__doc__)
         self.dock.setStyleSheet('QDockWidget::title{text-align: center;}')
         self.dock.setWidget(self.scrollable)
 
-        self.misc = self.locator.get_service('misc')
-        self.misc.add_widget(self.dock, QIcon.fromTheme("virtualbox"), __doc__)
+        self.locator.get_service('misc').add_widget(self.dock,
+                                 QIcon.fromTheme("virtualbox"), __doc__)
 
         self.tab1, self.tab2, self.tab3 = QGroupBox(), QGroupBox(), QGroupBox()
         self.tab4, self.tab5, self.tab6 = QGroupBox(), QGroupBox(), QGroupBox()
@@ -186,9 +207,8 @@ class Main(plugin.Plugin):
         self.btn1.setToolTip('Suggest me a Random VM name !')
         self.btn1.clicked.connect(lambda:
                                   self.vmname.setText(self.get_random_name()))
-        self.vmcode = QComboBox()
+        self.vmcode, self.vmarch = QComboBox(), QComboBox()
         self.vmcode.addItems(['saucy', 'raring', 'quantal', 'precise'])
-        self.vmarch = QComboBox()
         self.vmarch.addItems(['x86_64 (amd64) 64-Bits', 'x86 (i386) 32-Bits'])
         vboxg1 = QVBoxLayout(self.tab1)
         for each_widget in (
@@ -198,11 +218,7 @@ class Main(plugin.Plugin):
             self.target):
             vboxg1.addWidget(each_widget)
 
-        self.combo1 = QSpinBox()
-        self.combo1.setValue(20)
-        self.combo1.setMaximum(20)
-        self.combo1.setMinimum(0)
-        self.combo1.setToolTip('Backend Nice priority (0 = High, 20 = Low)')
+        self.chrt = QCheckBox('LOW CPU priority for Backend Process')
         self.chttps = QComboBox()
         self.chttps.addItems(['https', 'http'])
         try:
@@ -222,8 +238,7 @@ class Main(plugin.Plugin):
         self.qckb3 = QCheckBox(' NO run Headless Mode, use a Window')
         self.qckb3.setToolTip('Show the VM on a Window GUI instead of Headless')
         vboxg2 = QVBoxLayout(self.tab2)
-        for each_widget in (self.qckb1, self.qckb2, self.qckb3,
-            QLabel('<b>Backend CPU priority:</b>'), self.combo1,
+        for each_widget in (self.qckb1, self.qckb2, self.qckb3, self.chrt,
             QLabel('<b>Download Protocol Type:</b>'), self.chttps,
             self.vinfo1, self.vinfo2):
             vboxg2.addWidget(each_widget)
@@ -234,20 +249,27 @@ class Main(plugin.Plugin):
         self.qckb12 = QCheckBox('Run apt-get clean on the created VM')
         self.qckb13 = QCheckBox('Run apt-get autoremove on the created VM')
         self.qckb14 = QCheckBox('Try to Fix Broken packages if any on the VM')
+        self.aptproxy = QLineEdit()
+        self.aptproxy.setPlaceholderText(' user:password@proxyaddress:port ')
+        aptproxylbl = QLabel('<b>Network Proxy for apt-get on the created VM')
+        aptproxylbl.setMaximumHeight(25)
         vboxg3 = QVBoxLayout(self.tab3)
         for each_widget in (self.qckb10, self.qckb11, self.qckb12, self.qckb13,
-            self.qckb14):
+            self.qckb14, aptproxylbl, self.aptproxy):
             vboxg3.addWidget(each_widget)
 
-        self.aptpkg = QTextEdit('build-essential vim mc wget git')
-        self.aptppa = QLineEdit()
+        self.aptpkg = QTextEdit('build-essential git python-pip vim mc wget')
+        self.aptppa, self.pippkg = QLineEdit(), QTextEdit('virtualenv yolk')
         self.aptppa.setPlaceholderText(' ppa:ninja-ide-developers/daily ')
-        self.pippkg = QTextEdit('virtualenv')
+        self.requirements = QLineEdit()
+        self.requirements.setPlaceholderText(' /full/path/to/requirements.txt ')
+        self.requirements.setCompleter(self.completer)
         vboxg4 = QVBoxLayout(self.tab4)
         for each_widget in (
             QLabel('<b>Custom APT Ubuntu packages:</b> '), self.aptpkg,
             QLabel('<b>Custom APT Ubuntu PPA:</b>      '), self.aptppa,
-            QLabel('<b>Custom PIP Python packages:</b> '), self.pippkg, ):
+            QLabel('<b>Custom PIP Python packages:</b> '), self.pippkg,
+            QLabel('<b>Custom PIP Python requirements: '), self.requirements):
             vboxg4.addWidget(each_widget)
 
         self.buttonGroup = QButtonGroup()
@@ -267,6 +289,11 @@ class Main(plugin.Plugin):
             'Start Vagrant Instrumentation Now !')
         self.runbtn.setMinimumSize(75, 50)
         self.runbtn.clicked.connect(self.build)
+        glow = QGraphicsDropShadowEffect(self)
+        glow.setOffset(0)
+        glow.setBlurRadius(99)
+        glow.setColor(QColor(99, 255, 255))
+        self.runbtn.setGraphicsEffect(glow)
         self.stopbt = QPushButton(QIcon.fromTheme("media-playback-stop"),
             'Stop Vagrant')
         self.stopbt.clicked.connect(lambda: self.process.stop())
@@ -279,23 +306,9 @@ class Main(plugin.Plugin):
             self.runbtn, self.stopbt, self.killbt):
             vboxg6.addWidget(each_widget)
 
-        def must_glow(widget_list):
-            ' apply an glow effect to the widget '
-            for glow, each_widget in enumerate(widget_list):
-                try:
-                    if each_widget.graphicsEffect() is None:
-                        glow = QGraphicsDropShadowEffect(self)
-                        glow.setOffset(0)
-                        glow.setBlurRadius(99)
-                        glow.setColor(QColor(99, 255, 255))
-                        each_widget.setGraphicsEffect(glow)
-                        glow.setEnabled(True)
-                except:
-                    pass
-
-        must_glow((self.runbtn, ))
         [a.setChecked(True) for a in (self.qckb1, self.qckb2, self.qckb3,
-            self.qckb10, self.qckb11, self.qckb12, self.qckb13, self.qckb14)]
+            self.qckb10, self.qckb11, self.qckb12, self.qckb13, self.qckb14,
+            self.chrt)]
         self.mainwidget.setCurrentIndex(5)
 
     def get_de_pkg(self, button):
@@ -361,8 +374,7 @@ class Main(plugin.Plugin):
         except:
             self.output.append(self.formatErrorMsg('ERROR:Remove Vagrant file'))
         self.output.append(self.formatInfoMsg(' INFO: OK: Runing Vagrant Init'))
-        cmd1 = getoutput('nice -n {} vagrant init'.format(self.combo1.value()),
-                         shell=True)
+        cmd1 = getoutput('chrt --verbose -i 0 vagrant init', shell=True)
         self.output.append(self.formatInfoMsg('INFO:OK:Completed Vagrant Init'))
         self.output.append(self.formatInfoMsg('INFO: Command: {}'.format(cmd1)))
         cfg = CONFIG.format(self.vmname.text(), self.chttps.currentText(),
@@ -374,14 +386,21 @@ class Main(plugin.Plugin):
             f.write(cfg)
             self.output.append(self.formatInfoMsg('INFO: Writing Vagrantfile'))
             f.close()
-        prv = ''.join(('#!/usr/bin/env bash', linesep * 4,
+        proxy = APTGET_PROXY.format(self.aptproxy.text(), self.aptproxy.text(),
+            self.aptproxy.text(), self.aptproxy.text(), self.aptproxy.text(),
+            self.aptproxy.text())
+        prv = ''.join(('#!/usr/bin/env bash', linesep,
+        '# -*- coding: utf-8 -*-',
+        linesep * 4,
         "PS1='\[\e[1;32m\][\u@\h \W]\$\[\e[0m\] ' ; HISTSIZE=5000",
         linesep * 2,
         '# Vagrant Bootstrap Provisioning autogenerated by Vagrant Ninja-IDE !',
         linesep * 2,
+        proxy if len(self.aptproxy.text()) >= 5 else '',
+        linesep * 2,
         'add-apt-repository -s -y {}'.format(str(self.aptppa.text()).strip()),
         linesep * 2,
-        'apt-get -y update' if self.qckb10.isChecked() is True else '',
+        'apt-get -V -u -m -y update' if self.qckb10.isChecked() is True else '',
         linesep * 2,
         'apt-get -y -m dist-upgrade' if self.qckb11.isChecked() is True else '',
         linesep * 2,
@@ -397,9 +416,21 @@ class Main(plugin.Plugin):
         linesep * 2,
         'apt-get -y --force-yes install {}'.format(self.aptpkg.toPlainText()),
         linesep * 2,
-        'pip install --upgrade --verbose {}'.format(self.pippkg.toPlainText()),
+        'pip install --verbose {}'.format(self.pippkg.toPlainText()),
+        linesep * 2,
+        'pip install --verbose -r {}'.format(self.requirements.text()),
         linesep * 2,
         'apt-get -y --force-yes -m install {}'.format(self.desktop),
+        linesep * 2,
+        'git config --global user.name "{}"'.format(getuser()), linesep,
+        'git config --global color.branch auto', linesep,
+        'git config --global color.diff auto', linesep,
+        'git config --global color.interactive auto', linesep,
+        'git config --global color.status auto', linesep,
+        'git config --global credential.helper cache', linesep,
+        'git config --global user.email "{}@gmail.com"'.format(getuser()),
+        linesep * 2,
+        'ufw status ; service ufw stop ; ufw disable',
         linesep * 2,
         ))
         self.output.append(self.formatInfoMsg('INFO:OK:Script: {}'.format(prv)))
@@ -416,7 +447,8 @@ class Main(plugin.Plugin):
         self.output.append(self.formatInfoMsg(''' INFO: OK:
         Vagrant Up needs time, depends on your Internet Connection Speed !'''))
         self.output.append(self.formatInfoMsg('INFO: OK: Running Vagrant Up !'))
-        self.process.start('nice -n {} vagrant up'.format(self.combo1.value()))
+        self.process.start('{}vagrant up'.format('chrt --verbose -i 0 '
+            if self.chrt.isChecked() is True else ''))
         if not self.process.waitForStarted():
             self.output.append(self.formatErrorMsg('ERROR: FAIL: Vagrant Fail'))
             self.runbtn.setEnabled(True)
@@ -440,6 +472,24 @@ class Main(plugin.Plugin):
                 startfile(BASE)
             except:
                 Popen(["xdg-open", BASE])
+        chdir(path.expanduser("~"))
+
+    def vagrant_c(self, option):
+        ' run the choosed menu option, kind of quick-mode '
+        self.output.setText('')
+        self.output.append(self.formatInfoMsg(
+                            'INFO: OK: Starting at {}'.format(datetime.now())))
+        self.runbtn.setDisabled(True)
+        chdir(path.abspath(
+          self.locator.get_service('explorer').get_current_project_item().path))
+        self.process.start('chrt --verbose -i 0 vagrant {}'.format(option))
+        if not self.process.waitForStarted():
+            self.output.append(self.formatErrorMsg('ERROR: FAIL: Vagrant Fail'))
+            self.runbtn.setEnabled(True)
+            return
+        self.runbtn.setEnabled(True)
+        self.output.append(self.formatInfoMsg(
+                            'INFO: OK: Finished at {}'.format(datetime.now())))
         chdir(path.expanduser("~"))
 
 
