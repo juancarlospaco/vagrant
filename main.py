@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 2.0 '
+__version__ = ' 2.2 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -491,6 +491,10 @@ class Main(plugin.Plugin):
         self.output.append(self.formatInfoMsg(
                             'INFO: OK: Finished at {}'.format(datetime.now())))
         chdir(path.expanduser("~"))
+
+    def finish(self):
+        ' clear when finish '
+        self.process.kill()
 
 
 ###############################################################################
