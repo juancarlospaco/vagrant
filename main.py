@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 2.4 '
+__version__ = ' 2.6 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -190,7 +190,7 @@ class Main(plugin.Plugin):
         ).clicked.connect(lambda: QMessageBox.information(self.dock, __doc__,
         HELPMSG))
 
-        self.vmname = QLineEdit(self.get_random_name())
+        self.vmname = QLineEdit(self.get_name())
         self.vmname.setPlaceholderText('type_your_VM_name_here_without_spaces')
         self.vmname.setToolTip('Type VM name, no spaces or special characters')
         self.target = QLabel('<b>Vagrant Target Folder: ' +
