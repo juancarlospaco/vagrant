@@ -18,7 +18,7 @@
 
 # metadata
 ' Vagrant Ninja '
-__version__ = ' 2.2 '
+__version__ = ' 2.4 '
 __license__ = ' GPL '
 __author__ = ' juancarlospaco '
 __email__ = ' juancarlospaco@ubuntu.com '
@@ -46,7 +46,7 @@ except ImportError:
 from PyQt4.QtGui import (QLabel, QCompleter, QDirModel, QPushButton, QMenu,
     QDockWidget, QVBoxLayout, QLineEdit, QIcon, QCheckBox, QColor, QMessageBox,
     QGraphicsDropShadowEffect, QGroupBox, QComboBox, QTabWidget, QButtonGroup,
-    QAbstractButton, QScrollArea)
+    QAbstractButton, QScrollArea, QSpinBox)
 
 from PyQt4.QtCore import Qt, QDir, QProcess, QUrl
 
@@ -69,32 +69,26 @@ from ninja_ide.core import plugin
 HELPMSG = '''<h3>Vagrant</h3>
 Vagrant provides easy to configure, reproducible, and portable work environments
 built on top of industry-standard technology and controlled by a single
-consistent workflow.
-<br>
-Machines are provisioned on top of VirtualBox.
+consistent workflow.<br>Machines are provisioned on top of VirtualBox.
 Provisioning tools automatically install and configure software on the machine.
-<br><br>
-<b>If you are Developer</b>, Vagrant will isolate dependencies and configuration
-within a single disposable, consistent environment, without sacrificing any of
-the tools you are used to working with (editors, browsers, debuggers, etc.).
+<br><br><b>If you are Developer</b>, Vagrant will isolate dependencies and
+configuration within a single disposable, consistent environment, without
+sacrificing any of tools you are used to working with (editors, debuggers, etc).
 Once you or someone else creates a single Vagrantfile, you just need to vagrant
  up and everything is installed and configured for you to work.
  Other members of your team create their development environments from the same
  configuration, so whether you are working on Linux, OSX, or Windows, all your
  team members are running code in the same environment, against the same
- dependencies, all configured the same way.
- Say goodbye to "works on my machine" bugs.
-<br><br>
-Visit <a href="http://vagrantup.com">Vagrantup.com</a>
-and <a href="http://virtualbox.org">Virtualbox.org</a>
-<br><br>
+dependencies, all configured same way. Say goodbye to "works on my machine" bugs
+.<br><br>Visit <a href="http://vagrantup.com">Vagrantup.com</a> and
+<a href="http://virtualbox.org">Virtualbox.org</a><br><br>
 ''' + ''.join((__doc__, __version__, __license__, 'by', __author__, __email__))
 
 VBOXGUI = '''
     config.vm.provider :virtualbox do |vb|
         vb.gui = true  # false for NO GUI
-        vb.customize ["modifyvm", :id, "--memory", "1024"]  # RAM for VM
-        vb.customize ["modifyvm", :id, "--cpuexecutioncap", "99"]  # CPU for VM
+        vb.customize ["modifyvm", :id, "--memory", "{}"]  # RAM for VM
+        vb.customize ["modifyvm", :id, "--cpuexecutioncap", "{}"]  # CPU for VM
     end
 '''
 
@@ -110,8 +104,11 @@ export ftp_proxy='ftp://{}'
 CONFIG = '''
 Vagrant.configure("2") do |config|
     config.vm.box = "{}"
+    config.vm.hostname = "{}"
     config.vm.box_url = "{}://cloud-images.ubuntu.com/vagrant/{}/current/{}-server-cloudimg-{}-vagrant-disk1.box"
     config.vm.provision :shell, :path => "bootstrap.sh"
+
+{}
     {}
 end
 '''
@@ -127,8 +124,6 @@ class Main(plugin.Plugin):
     def initialize(self, *args, **kwargs):
         " Init Main Class "
         super(Main, self).initialize(*args, **kwargs)
-
-        # directory auto completer
         self.completer, self.dirs = QCompleter(self), QDirModel(self)
         self.dirs.setFilter(QDir.AllEntries | QDir.NoDotAndDotDot)
         self.completer.setModel(self.dirs)
@@ -184,10 +179,9 @@ class Main(plugin.Plugin):
 
         self.tab1, self.tab2, self.tab3 = QGroupBox(), QGroupBox(), QGroupBox()
         self.tab4, self.tab5, self.tab6 = QGroupBox(), QGroupBox(), QGroupBox()
-        for a, b in ((self.tab1, 'Basic Startup'),
-            (self.tab2, 'General Options'), (self.tab3, 'VM Package Manager'),
-            (self.tab4, 'VM Provisioning'), (self.tab5, 'VM Desktop GUI'),
-                     (self.tab6, 'Run')):
+        for a, b in ((self.tab1, 'Basics'), (self.tab2, 'General Options'),
+            (self.tab3, 'VM Package Manager'), (self.tab4, 'VM Provisioning'),
+            (self.tab5, 'VM Desktop GUI'), (self.tab6, 'Run')):
             a.setTitle(b)
             a.setToolTip(b)
             self.mainwidget.addTab(a, QIcon.fromTheme("virtualbox"), b)
@@ -205,42 +199,42 @@ class Main(plugin.Plugin):
             '<b>Vagrant Target Folder: ' + path.join(BASE, self.vmname.text())))
         self.btn1 = QPushButton(QIcon.fromTheme("face-smile-big"), 'Suggestion')
         self.btn1.setToolTip('Suggest me a Random VM name !')
-        self.btn1.clicked.connect(lambda:
-                                  self.vmname.setText(self.get_random_name()))
+        self.btn1.clicked.connect(lambda: self.vmname.setText(self.get_name()))
         self.vmcode, self.vmarch = QComboBox(), QComboBox()
         self.vmcode.addItems(['saucy', 'raring', 'quantal', 'precise'])
         self.vmarch.addItems(['x86_64 (amd64) 64-Bits', 'x86 (i386) 32-Bits'])
         vboxg1 = QVBoxLayout(self.tab1)
-        for each_widget in (
-            QLabel('<b>Name for your new VM:</b>'), self.vmname, self.btn1,
+        for each_widget in (QLabel('<b>Name for VM'), self.vmname, self.btn1,
             QLabel('<b>Choose Ubuntu Codename for the VM:</b>'), self.vmcode,
-            QLabel('<b>Choose an Architecture for the VM:</b>'), self.vmarch,
-            self.target):
+            QLabel('<b>Choose Architecture for VM:'), self.vmarch, self.target):
             vboxg1.addWidget(each_widget)
 
         self.chrt = QCheckBox('LOW CPU priority for Backend Process')
         self.chttps = QComboBox()
         self.chttps.addItems(['https', 'http'])
         try:
-            self.vinfo1 = QLabel('<b> Vagrant Backend Version: </b>' +
-                            getoutput('vagrant --version', shell=1).strip())
+            self.vinfo1 = QLabel('''<b> Vagrant Backend Version: </b> {},
+                <b> VirtualBox Backend Version: </b> {}. '''.format(
+                getoutput('vagrant --version', shell=1).strip(),
+                getoutput('vboxmanage --version', shell=1).strip()))
         except:
             self.vinfo1 = QLabel('<b>Warning: Failed to query Vagrant Backend!')
-        try:
-            self.vinfo2 = QLabel('<b> VirtualBox Backend Version: </b>' +
-                            getoutput('vboxmanage --version', shell=1).strip())
-        except:
-            self.vinfo2 = QLabel('<b>Warning: Failed query VirtualBox Backend')
         self.qckb1 = QCheckBox(' Open target directory later')
         self.qckb1.setToolTip('Open the target directory when finished')
         self.qckb2 = QCheckBox(' Save a LOG file to target later')
         self.qckb2.setToolTip('Save a read-only .LOG file to target')
         self.qckb3 = QCheckBox(' NO run Headless Mode, use a Window')
         self.qckb3.setToolTip('Show the VM on a Window GUI instead of Headless')
+        self.cpu, self.ram = QSpinBox(), QSpinBox()
+        self.cpu.setRange(25, 99)
+        self.cpu.setValue(99)
+        self.ram.setRange(512, 4096)
+        self.ram.setValue(1024)
         vboxg2 = QVBoxLayout(self.tab2)
         for each_widget in (self.qckb1, self.qckb2, self.qckb3, self.chrt,
-            QLabel('<b>Download Protocol Type:</b>'), self.chttps,
-            self.vinfo1, self.vinfo2):
+            QLabel('<b>Max CPU Limit for VM:</b>'), self.cpu,
+            QLabel('<b>Max RAM Limit for VM:</b>'), self.ram,
+            QLabel('<b>Download Protocol Type:</b>'), self.chttps, self.vinfo1):
             vboxg2.addWidget(each_widget)
 
         self.qckb10 = QCheckBox('Run apt-get update on the created VM')
@@ -249,13 +243,13 @@ class Main(plugin.Plugin):
         self.qckb12 = QCheckBox('Run apt-get clean on the created VM')
         self.qckb13 = QCheckBox('Run apt-get autoremove on the created VM')
         self.qckb14 = QCheckBox('Try to Fix Broken packages if any on the VM')
-        self.aptproxy = QLineEdit()
+        self.aptproxy, self.portredirect = QLineEdit(), QLineEdit('8000, 9000')
         self.aptproxy.setPlaceholderText(' user:password@proxyaddress:port ')
-        aptproxylbl = QLabel('<b>Network Proxy for apt-get on the created VM')
-        aptproxylbl.setMaximumHeight(25)
         vboxg3 = QVBoxLayout(self.tab3)
         for each_widget in (self.qckb10, self.qckb11, self.qckb12, self.qckb13,
-            self.qckb14, aptproxylbl, self.aptproxy):
+            self.qckb14,
+            QLabel('<b>Network Proxy for apt-get on the VM'), self.aptproxy,
+            QLabel('<b>Network Port Redirects for the VM'), self.portredirect):
             vboxg3.addWidget(each_widget)
 
         self.aptpkg = QTextEdit('build-essential git python-pip vim mc wget')
@@ -265,8 +259,7 @@ class Main(plugin.Plugin):
         self.requirements.setPlaceholderText(' /full/path/to/requirements.txt ')
         self.requirements.setCompleter(self.completer)
         vboxg4 = QVBoxLayout(self.tab4)
-        for each_widget in (
-            QLabel('<b>Custom APT Ubuntu packages:</b> '), self.aptpkg,
+        for each_widget in (QLabel('<b>Custom APT Ubuntu package'), self.aptpkg,
             QLabel('<b>Custom APT Ubuntu PPA:</b>      '), self.aptppa,
             QLabel('<b>Custom PIP Python packages:</b> '), self.pippkg,
             QLabel('<b>Custom PIP Python requirements: '), self.requirements):
@@ -301,8 +294,7 @@ class Main(plugin.Plugin):
             'Force Kill Vagrant')
         self.killbt.clicked.connect(lambda: self.process.kill())
         vboxg6 = QVBoxLayout(self.tab6)
-        for each_widget in (
-            QLabel('<b>Multiprocessing Output Logs:</b> '), self.output,
+        for each_widget in (QLabel('<b>Multiprocess Output Logs'), self.output,
             self.runbtn, self.stopbt, self.killbt):
             vboxg6.addWidget(each_widget)
 
@@ -323,7 +315,7 @@ class Main(plugin.Plugin):
             self.desktop = 'xubuntu-desktop'
         return self.desktop
 
-    def get_random_name(self):
+    def get_name(self):
         ' return a random name of stars, planets and moons of solar system '
         return choice((getuser(), 'sun', 'mercury', 'venus', 'earth', 'mars',
             'neptun', 'ceres', 'pluto', 'haumea', 'makemake', 'eris', 'moon',
@@ -356,13 +348,11 @@ class Main(plugin.Plugin):
     def build(self):
         """Main function calling vagrant to generate the vm"""
         self.output.setText('')
-        self.output.append(self.formatInfoMsg(
-                            'INFO: OK: Starting at {}'.format(datetime.now())))
+        self.output.append(self.formatInfoMsg('INFO:{}'.format(datetime.now())))
         self.runbtn.setDisabled(True)
         base = path.join(BASE, self.vmname.text())
         try:
-            self.output.append(self.formatInfoMsg(
-                ' INFO: OK: Created the Target Folder {}'.format(base)))
+            self.output.append(self.formatInfoMsg('INFO: Dir: {}'.format(base)))
             makedirs(base)
         except:
             self.output.append(self.formatErrorMsg('ERROR:Target Folder Exist'))
@@ -377,10 +367,15 @@ class Main(plugin.Plugin):
         cmd1 = getoutput('chrt --verbose -i 0 vagrant init', shell=True)
         self.output.append(self.formatInfoMsg('INFO:OK:Completed Vagrant Init'))
         self.output.append(self.formatInfoMsg('INFO: Command: {}'.format(cmd1)))
-        cfg = CONFIG.format(self.vmname.text(), self.chttps.currentText(),
-            self.vmcode.currentText(), self.vmcode.currentText(),
+        cfg = CONFIG.format(self.vmname.text(), self.vmname.text(),
+            self.chttps.currentText(), self.vmcode.currentText(),
+            self.vmcode.currentText(),
             'amd64' if self.vmarch.currentIndex() is 0 else 'i386',
-            VBOXGUI if self.qckb3.isChecked() is True else '')
+            '\n'.join(([
+            '    config.vm.network :forwarded_port, host: {}, guest: {}'.format(
+                a, a) for a in str(self.portredirect.text()).split(',')])),
+            VBOXGUI.format(self.ram.value(), self.cpu.value())
+                if self.qckb3.isChecked() is True else '')
         self.output.append(self.formatInfoMsg('INFO:OK:Config: {}'.format(cfg)))
         with open(path.join(base, 'Vagrantfile'), 'w') as f:
             f.write(cfg)
@@ -389,50 +384,34 @@ class Main(plugin.Plugin):
         proxy = APTGET_PROXY.format(self.aptproxy.text(), self.aptproxy.text(),
             self.aptproxy.text(), self.aptproxy.text(), self.aptproxy.text(),
             self.aptproxy.text())
-        prv = ''.join(('#!/usr/bin/env bash', linesep,
-        '# -*- coding: utf-8 -*-',
-        linesep * 4,
-        "PS1='\[\e[1;32m\][\u@\h \W]\$\[\e[0m\] ' ; HISTSIZE=5000",
-        linesep * 2,
-        '# Vagrant Bootstrap Provisioning autogenerated by Vagrant Ninja-IDE !',
-        linesep * 2,
+        prv = '\n'.join(('#!/usr/bin/env bash', '# -*- coding: utf-8 -*-',
+        linesep * 2, "PS1='\[\e[1;32m\][\u@\h \W]\$\[\e[0m\] ' ; HISTSIZE=5000",
+        '# Vagrant Bootstrap Provisioning generated by Vagrant Ninja!', linesep,
         proxy if len(self.aptproxy.text()) >= 5 else '',
-        linesep * 2,
         'add-apt-repository -s -y {}'.format(str(self.aptppa.text()).strip()),
-        linesep * 2,
         'apt-get -V -u -m -y update' if self.qckb10.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y -m dist-upgrade' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y -m autoremove' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y clean' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'dpkg --configure -a' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y -f install' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y check' if self.qckb11.isChecked() is True else '',
-        linesep * 2,
         'apt-get -y --force-yes install {}'.format(self.aptpkg.toPlainText()),
-        linesep * 2,
         'pip install --verbose {}'.format(self.pippkg.toPlainText()),
-        linesep * 2,
         'pip install --verbose -r {}'.format(self.requirements.text()),
-        linesep * 2,
-        'apt-get -y --force-yes -m install {}'.format(self.desktop),
-        linesep * 2,
-        'git config --global user.name "{}"'.format(getuser()), linesep,
-        'git config --global color.branch auto', linesep,
-        'git config --global color.diff auto', linesep,
-        'git config --global color.interactive auto', linesep,
-        'git config --global color.status auto', linesep,
-        'git config --global credential.helper cache', linesep,
+        'apt-get -y --force-yes -m install {}'.format(self.desktop), linesep,
+        'git config --global user.name "{}"'.format(getuser()),
+        'git config --global color.branch auto',
+        'git config --global color.diff auto',
+        'git config --global color.interactive auto',
+        'git config --global color.status auto',
+        'git config --global credential.helper cache',
         'git config --global user.email "{}@gmail.com"'.format(getuser()),
-        linesep * 2,
-        'ufw status ; service ufw stop ; ufw disable',
-        linesep * 2,
-        ))
+        'git config --global push.default simple',
+        'ufw status ; service ufw stop ; ufw disable ; swapoff --verbose --all',
+        'export LANGUAGE=en_US.UTF-8', 'export LANG=en_US.UTF-8',
+        'export LC_ALL=en_US.UTF-8', 'locale-gen en_US.UTF-8',
+        'dpkg-reconfigure locales', ))
         self.output.append(self.formatInfoMsg('INFO:OK:Script: {}'.format(prv)))
         with open(path.join(base, 'bootstrap.sh'), 'w') as f:
             f.write(prv)
@@ -458,8 +437,7 @@ class Main(plugin.Plugin):
 
     def _process_finished(self):
         """finished sucessfully"""
-        self.output.append(self.formatInfoMsg(
-                            'INFO: OK: Finished at {}'.format(datetime.now())))
+        self.output.append(self.formatInfoMsg('INFO:{}'.format(datetime.now())))
         if self.qckb2.isChecked() is True:
             LOG_FILE = path.join(BASE, self.vmname.text(), 'vagrant_ninja.log')
             with open(LOG_FILE, 'w') as f:
@@ -477,8 +455,7 @@ class Main(plugin.Plugin):
     def vagrant_c(self, option):
         ' run the choosed menu option, kind of quick-mode '
         self.output.setText('')
-        self.output.append(self.formatInfoMsg(
-                            'INFO: OK: Starting at {}'.format(datetime.now())))
+        self.output.append(self.formatInfoMsg('INFO:{}'.format(datetime.now())))
         self.runbtn.setDisabled(True)
         chdir(path.abspath(
           self.locator.get_service('explorer').get_current_project_item().path))
@@ -488,8 +465,7 @@ class Main(plugin.Plugin):
             self.runbtn.setEnabled(True)
             return
         self.runbtn.setEnabled(True)
-        self.output.append(self.formatInfoMsg(
-                            'INFO: OK: Finished at {}'.format(datetime.now())))
+        self.output.append(self.formatInfoMsg('INFO:{}'.format(datetime.now())))
         chdir(path.expanduser("~"))
 
     def finish(self):
